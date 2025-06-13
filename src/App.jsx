@@ -41,7 +41,7 @@ const App = () => {
             chatHistory.push({ role: "user", parts: [{ text: prompt }] });
 
             const payload = { contents: chatHistory };
-            const apiKey = ""; // Canvas will provide this API key at runtime
+            const apiKey = import.meta.env.VITE_GEMINI_API_KEY; // Canvas will provide this API key at runtime
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
             // Make the API call to Gemini
