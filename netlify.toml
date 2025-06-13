@@ -5,3 +5,5 @@
 [functions]
   directory = "netlify/functions" # This tells Netlify where your functions code lives
   node_bundler = "esbuild"      # Recommended for faster builds and smaller bundles
+  # IMPORTANT: Mark @google/generative-ai as external to avoid bundling errors
+  external_node_modules = ["@google/generative-ai"]
