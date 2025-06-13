@@ -1,0 +1,21 @@
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyAkkPHH7jsYFxenWdx-Xfv5ahp_6dQuyak",
+  authDomain: "arduino-code-forge.firebaseapp.com",
+  projectId: "arduino-code-forge",
+  storageBucket: "arduino-code-forge.firebasestorage.app",
+  messagingSenderId: "108240431983",
+  appId: "1:108240431983:web:281bfa8a3e02e122b0969a",
+  measurementId: "G-HR0HV6LM8X"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
