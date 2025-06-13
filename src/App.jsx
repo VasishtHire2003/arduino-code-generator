@@ -23,7 +23,7 @@ const App = () => {
     ];
 
     /**
-     * Handles the generation of Arduino code by making an API call to Gemini.
+     * Handles the generation of Arduino code by making an API call to the Netlify Function proxy.
      * Sets loading states, handles success, and manages error messages.
      */
     const handleGenerateCode = async () => {
@@ -33,49 +33,50 @@ const App = () => {
         setIsLoading(true);
 
         try {
-            // Construct the prompt for the Gemini API
-            const prompt = `Generate Arduino code for a ${selectedComponent} that performs the following: ${description}. Ensure the code is complete, includes setup() and loop() functions, defines necessary pins, and adds clear, concise comments. If the component needs a library (e.g., DHT sensor), include the #include directive and a note about installing the library.`;
+            // Define the URL for your Netlify Function proxy.
+            // This path corresponds to the `generate-arduino-code.js` file in your `netlify/functions` directory.
+            const functionUrl = '/.netlify/functions/generate-arduino-code';
 
-            // Prepare the payload for the Gemini API request
-            let chatHistory = [];
-            chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+            // Prepare the payload to send to your Netlify Function.
+            // The function will then use this data to construct the actual prompt for the Gemini API.
+            const functionPayload = {
+                selectedComponent,
+                description,
+                model: "gemini-2.0-flash" // You can pass the model name if you want flexibility
+            };
 
-            const payload = { contents: chatHistory };
-            const apiKey = import.meta.env.VITE_GEMINI_API_KEY; // Canvas will provide this API key at runtime
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-            // Make the API call to Gemini
-            const response = await fetch(apiUrl, {
+            // Make the fetch call to your Netlify Function.
+            const response = await fetch(functionUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(functionPayload)
             });
 
-            // Check if the response was successful
+            // Check if the response from your Netlify Function was successful.
             if (!response.ok) {
-                // If not successful, throw an error with the status text
-                throw new Error(`API error: ${response.statusText}`);
+                // If not successful, parse the error from the function's response if available,
+                // otherwise, throw a generic error.
+                const errorData = await response.json();
+                throw new Error(errorData.error || `Netlify Function error: ${response.statusText}`);
             }
 
-            // Parse the JSON response
+            // Parse the JSON response from your Netlify Function.
+            // It's expected to contain a 'generatedCode' property.
             const result = await response.json();
 
-            // Check if the API returned valid content
-            if (result.candidates && result.candidates.length > 0 &&
-                result.candidates[0].content && result.candidates[0].content.parts &&
-                result.candidates[0].content.parts.length > 0) {
-                // Set the generated code and clear any existing error
-                setGeneratedCode(result.candidates[0].content.parts[0].text);
-                setError(null);
+            // Check if the function returned the 'generatedCode' property.
+            if (result.generatedCode) {
+                setGeneratedCode(result.generatedCode);
+                setError(null); // Clear any previous error
             } else {
-                // If no valid content, set a specific error message
-                setError("No code generated. Please try a different or more detailed description.");
+                // If 'generatedCode' is missing, set a specific error message.
+                setError("No code received from the proxy function. Please try a different description.");
                 setGeneratedCode("");
             }
         } catch (err) {
-            // Catch and display any errors during the fetch operation
-            console.error("Error generating code:", err);
-            setError("Failed to generate code. Please check your internet connection or try again later.");
+            // Catch and display any errors during the fetch operation or from the function's response.
+            console.error("Error generating code via proxy:", err);
+            setError(`Failed to generate code: ${err.message || 'An unknown error occurred.'}`);
             setGeneratedCode("");
         } finally {
             // Always set isLoading to false once the API call is complete (success or failure)
@@ -125,7 +126,6 @@ const App = () => {
             </header>
 
             {/* Main Content Area */}
-            {/* Updated the main element to use max-w-full to expand across the full width */}
             <main className="w-full max-w-full mx-auto p-6 flex-grow flex flex-col md:flex-row gap-8 py-8">
                 {/* Input Panel */}
                 <section className="bg-gray-800 p-6 rounded-xl shadow-xl md:w-1/2 w-full flex flex-col border border-gray-700">
