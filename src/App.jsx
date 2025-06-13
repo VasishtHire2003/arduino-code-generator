@@ -20,21 +20,34 @@ import {
     serverTimestamp // To store the timestamp of code generation
 } from 'firebase/firestore';
 
+// --- Constants (Moved outside component to ensure global availability) ---
+// Array of available Arduino components for the dropdown
+const arduinoComponents = [
+    'LED',
+    'DHT11 (Temperature/Humidity Sensor)',
+    'PIR Sensor (Motion Sensor)',
+    'Servo Motor',
+    'Buzzer',
+    'LCD Display',
+    'Push Button',
+    'Potentiometer'
+];
+
 // Main App component
 const App = () => {
     // --- Application State ---
     const [selectedComponent, setSelectedComponent] = useState('');
     const [description, setDescription] = useState('');
     const [generatedCode, setGeneratedCode] = useState('');
-    const [isLoading, setIsLoading] = useState(false); // For Gemini API call
-    const [error, setError] = useState(null);
+    const [isLoading, setIsLoading] = useState(false); // For Gemini API call (and now auth actions)
+    const [error, setError] = useState(null); // General application errors
     const [showCopySuccess, setShowCopySuccess] = useState(false);
     const [codeHistory, setCodeHistory] = useState([]); // Stores generated code history from Firestore
 
     // --- Authentication State ---
     const [user, setUser] = useState(null); // Firebase authenticated user object
     const [isLoadingAuth, setIsLoadingAuth] = useState(true); // Tracks if auth state is still loading
-    const [authError, setAuthError] = useState(null); // Auth specific errors
+    const [authError, setAuthError] = useState(null); // Auth specific errors (e.g., login/signup failures)
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isLoginMode, setIsLoginMode] = useState(true); // Toggle between login/signup forms
@@ -61,121 +74,136 @@ const App = () => {
     const db = getFirestore(firebaseApp);
 
     // --- Firebase Auth State Listener ---
+    // This effect runs once on mount to establish the initial auth state and listen for changes.
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             if (currentUser) {
+                // User is signed in (either email/password or anonymous)
                 setUser(currentUser);
-                setUserId(currentUser.uid); // Set UID for authenticated users
-                setAuthError(null);
+                setUserId(currentUser.uid); // Use Firebase UID for authenticated users
+                setAuthError(null); // Clear any auth errors
             } else {
-                // If no user is logged in, try to sign in anonymously with provided token (for Canvas)
-                // or just sign in anonymously if no token exists (for local or new anonymous sessions)
+                // No user is logged in. Attempt anonymous sign-in, which is useful for Canvas or public access.
                 try {
+                    // Check if __initial_auth_token is provided (Canvas-specific behavior)
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                         await signInWithCustomToken(auth, __initial_auth_token);
                     } else {
+                        // If no token, or running locally, sign in anonymously.
                         await signInAnonymously(auth);
                     }
-                    // After anonymous sign-in, onAuthStateChanged will trigger again with the anonymous user
+                    // onAuthStateChanged will trigger again with the new anonymous user
                 } catch (anonError) {
                     console.error("Anonymous sign-in failed:", anonError);
-                    setAuthError("Failed to sign in anonymously. Please try again.");
+                    // This error indicates a potential Firebase config/rules issue for anonymous auth.
+                    setAuthError("Failed to sign in anonymously. Please check Firebase settings (Anonymous Auth, API Key restrictions).");
+                    // Fallback to a random ID if anonymous sign-in fails, so UI can still render.
+                    setUserId(crypto.randomUUID());
+                    setUser(null); // Explicitly set user to null if anonymous sign-in truly failed
                 }
-                setUserId(crypto.randomUUID()); // Generate a random ID for unauthenticated sessions
-                setUser(null); // Ensure user is null if not authenticated
             }
-            setIsLoadingAuth(false);
+            setIsLoadingAuth(false); // Authentication state has been determined
         });
 
-        // Cleanup the listener when the component unmounts
+        // Cleanup function for the effect: unsubscribe from auth state changes when component unmounts.
         return () => unsubscribe();
-    }, [auth]); // Re-run effect if auth object changes
+    }, [auth]); // Depend on the 'auth' object so the listener is set up correctly.
 
     // --- Firestore Data Listener for Code History ---
+    // This effect runs when auth state or user changes to fetch / update user-specific code history.
     useEffect(() => {
-        let unsubscribeFirestore = () => {}; // Initialize as a no-op function
+        let unsubscribeFirestore = () => {}; // Placeholder for Firestore listener unsubscribe function
 
-        // Only fetch history if Firebase and a user are ready and it's a non-anonymous user
+        // Only attempt to fetch history if Firebase is initialized, auth loading is complete,
+        // and a user is present AND they are NOT an anonymous user (to ensure history is for signed-up users).
         if (!isLoadingAuth && user && !user.isAnonymous) {
-            setAuthError(null); // Clear auth errors once user is properly authenticated
+            setAuthError(null); // Clear any auth-related errors that might be showing
+            // Construct the Firestore collection reference using the authenticated user's UID and app ID.
             const userHistoryCollectionRef = collection(db, `artifacts/${appId}/users/${user.uid}/generatedCode`);
             
-            // Note: orderBy is commented out as it requires indexes and might cause issues.
-            // Data will be sorted in memory if needed.
+            // Create a query for the collection.
+            // `orderBy('timestamp', 'desc')` is commented out as it requires a Firestore index.
+            // If you need ordering, you'll need to create an index in Firebase Console:
+            // Firestore Database -> Indexes -> Add index -> Collection ID: generatedCode, Fields: timestamp (desc)
             const q = query(userHistoryCollectionRef /*, orderBy('timestamp', 'desc')*/);
 
+            // Set up a real-time listener (onSnapshot) to update codeHistory whenever data changes in Firestore.
             unsubscribeFirestore = onSnapshot(q, (snapshot) => {
                 const history = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
+                    id: doc.id,         // Document ID
+                    ...doc.data()       // Document data (component, description, code, timestamp)
                 }));
-                // Sort in memory if orderBy is not used in query
+                // Manually sort in memory if orderBy is not used in the query to avoid index requirements.
                 history.sort((a, b) => (b.timestamp?.toDate() || 0) - (a.timestamp?.toDate() || 0));
                 setCodeHistory(history);
             }, (fsError) => {
+                // Error callback for Firestore listener
                 console.error("Error fetching code history:", fsError);
-                setError("Failed to load code history.");
+                setError("Failed to load code history. Please check your network or Firebase rules.");
             });
         } else if (!isLoadingAuth && user && user.isAnonymous) {
-            // Inform anonymous users about login for history
+            // If user is anonymous, inform them that history is not saved.
             setError("Log in or sign up to save and view your code history.");
-            setCodeHistory([]); // Clear history for anonymous users
+            setCodeHistory([]); // Ensure history is empty for anonymous users
         } else if (!isLoadingAuth && !user) {
-             // Handle case where no user or anonymous user exists
+             // If no user (and not loading auth), prompt to log in.
              setError("You need to log in or sign up to use all features.");
              setCodeHistory([]);
         }
 
-
-        // Cleanup Firestore listener
+        // Cleanup function for the effect: unsubscribe from Firestore listener.
         return () => unsubscribeFirestore();
-    }, [isLoadingAuth, user, db, appId]); // Depend on auth loading, user object, db instance, and appId
+    }, [isLoadingAuth, user, db, appId]); // Dependencies: Re-run when auth state, user, db, or appId changes.
 
     // --- Authentication Handlers ---
+    // Handles both login and signup form submission
     const handleAuthAction = async (e) => {
-        e.preventDefault();
-        setAuthError(null);
-        setIsLoading(true); // Use global isLoading for auth actions to disable buttons
+        e.preventDefault(); // Prevent default form submission behavior
+        setAuthError(null); // Clear previous authentication errors
+        setIsLoading(true); // Set general loading state to disable buttons
 
         try {
             if (isLoginMode) {
+                // Attempt to sign in an existing user with email and password
                 await signInWithEmailAndPassword(auth, email, password);
             } else {
+                // Attempt to create a new user with email and password
                 await createUserWithEmailAndPassword(auth, email, password);
             }
-            // onAuthStateChanged listener will handle setting user state on success
+            // onAuthStateChanged listener will automatically update the 'user' state on success
         } catch (error) {
             console.error("Authentication error:", error);
-            // Provide user-friendly error messages
-            let message = "An authentication error occurred.";
+            // Provide user-friendly error messages based on Firebase error codes
+            let message = "An authentication error occurred. Please try again.";
             if (error.code === 'auth/invalid-email') {
-                message = 'Invalid email address.';
+                message = 'Invalid email address format.';
             } else if (error.code === 'auth/user-disabled') {
                 message = 'This user account has been disabled.';
             } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
                 message = 'Invalid email or password.';
             } else if (error.code === 'auth/email-already-in-use') {
-                message = 'This email is already in use. Try logging in.';
+                message = 'This email is already in use. Try logging in instead.';
             } else if (error.code === 'auth/weak-password') {
                 message = 'Password should be at least 6 characters.';
             }
             setAuthError(message);
         } finally {
-            setIsLoading(false);
+            setIsLoading(false); // Reset general loading state
         }
     };
 
+    // Handles user sign out
     const handleSignOut = async () => {
-        setAuthError(null);
-        setIsLoading(true);
+        setAuthError(null); // Clear authentication errors
+        setIsLoading(true); // Set general loading state
         try {
-            await signOut(auth);
-            setCodeHistory([]); // Clear history on sign out
+            await signOut(auth); // Sign out the current user
+            setCodeHistory([]); // Clear code history on sign out
         } catch (error) {
             console.error("Sign out error:", error);
             setAuthError("Failed to sign out. Please try again.");
         } finally {
-            setIsLoading(false);
+            setIsLoading(false); // Reset general loading state
         }
     };
 
@@ -200,17 +228,23 @@ const App = () => {
                 model: "gemini-2.0-flash"
             };
 
+            // Make the fetch call to your Netlify Function.
             const response = await fetch(functionUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(functionPayload)
             });
 
+            // Check if the response from your Netlify Function was successful.
             if (!response.ok) {
+                // If not successful, parse the error from the function's response if available,
+                // otherwise, throw a generic error.
                 const errorData = await response.json();
                 throw new Error(errorData.error || `Netlify Function error: ${response.statusText}`);
             }
 
+            // Parse the JSON response from your Netlify Function.
+            // It's expected to contain a 'generatedCode' property.
             const result = await response.json();
 
             if (result.generatedCode) {
@@ -218,33 +252,39 @@ const App = () => {
                 setError(null); // Clear any previous error
 
                 // --- Save to Firestore ---
-                if (user && !user.isAnonymous) { // Only save for authenticated users
+                // Only save code to Firestore if the user is authenticated (not anonymous)
+                if (user && !user.isAnonymous) {
                     try {
+                        // Add a new document to the user's specific 'generatedCode' subcollection in Firestore.
                         await addDoc(collection(db, `artifacts/${appId}/users/${user.uid}/generatedCode`), {
                             component: selectedComponent,
                             description: description,
                             code: result.generatedCode,
-                            timestamp: serverTimestamp(), // Use server timestamp for consistency
-                            userId: user.uid // Redundant with path, but good for direct query if needed
+                            timestamp: serverTimestamp(), // Use server timestamp for consistent timekeeping
+                            userId: user.uid // Storing userId for redundancy and potential future queries
                         });
                         console.log("Code saved to Firestore successfully!");
                     } catch (fsSaveError) {
                         console.error("Error saving code to Firestore:", fsSaveError);
-                        setError("Code generated but failed to save to history.");
+                        setError("Code generated but failed to save to history. Check Firebase rules.");
                     }
                 } else {
+                    // Inform the user that history is not saved if they are not logged in.
                     setError("Code generated. Log in to save it to your history.");
                 }
 
             } else {
+                // If 'generatedCode' is missing in the response, set a specific error message.
                 setError("No code received from the proxy function. Please try a different description.");
                 setGeneratedCode("");
             }
         } catch (err) {
+            // Catch and display any errors during the fetch operation or from the function's response.
             console.error("Error generating code via proxy:", err);
             setError(`Failed to generate code: ${err.message || 'An unknown error occurred.'}`);
             setGeneratedCode("");
         } finally {
+            // Always set isLoading to false once the API call is complete (success or failure)
             setIsLoading(false);
         }
     };
@@ -256,6 +296,7 @@ const App = () => {
     const handleCopyCode = () => {
         const codeElement = document.getElementById('generated-code-block');
         if (codeElement) {
+            // Select the text content of the code block
             const selection = window.getSelection();
             const range = document.createRange();
             range.selectNodeContents(codeElement);
@@ -263,12 +304,15 @@ const App = () => {
             selection.addRange(range);
 
             try {
+                // Execute the copy command
                 document.execCommand('copy');
-                setShowCopySuccess(true);
-                setTimeout(() => setShowCopySuccess(false), 2000);
+                setShowCopySuccess(true); // Show the "Copied!" message
+                setTimeout(() => setShowCopySuccess(false), 2000); // Hide after 2 seconds
             } catch (err) {
                 console.error('Failed to copy text: ', err);
+                // Optionally, inform the user that copying failed
             } finally {
+                // Deselect the text
                 selection.removeAllRanges();
             }
         }
@@ -277,7 +321,7 @@ const App = () => {
     // Determine if the generate button should be disabled
     const isGenerateButtonDisabled = isLoading || !selectedComponent || !description.trim();
 
-    // Render loading state for authentication
+    // Render loading state for authentication before main app content
     if (isLoadingAuth) {
         return (
             <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center font-sans">
@@ -321,7 +365,7 @@ const App = () => {
             <main className="w-full max-w-full mx-auto p-6 flex-grow flex flex-col md:flex-row gap-8 py-8">
                 {/* Authentication / Main App Content Conditional Rendering */}
                 {!user || user.isAnonymous ? (
-                    // --- Authentication Forms ---
+                    // --- Authentication Forms (Login/Sign Up) ---
                     <section className="bg-gray-800 p-6 rounded-xl shadow-xl w-full max-w-md mx-auto flex flex-col border border-gray-700">
                         <h2 className="text-2xl font-semibold mb-6 text-purple-300 text-center">
                             {isLoginMode ? 'Login' : 'Sign Up'}
@@ -342,6 +386,7 @@ const App = () => {
                                     required
                                     className="block w-full p-3 border border-gray-600 rounded-lg shadow-sm focus:ring-purple-500 focus:border-purple-500 bg-gray-700 text-gray-100 transition-colors duration-200"
                                     placeholder="your.email@example.com"
+                                    autoComplete="email" // Added autocomplete
                                 />
                             </div>
                             <div>
@@ -354,6 +399,7 @@ const App = () => {
                                     required
                                     className="block w-full p-3 border border-gray-600 rounded-lg shadow-sm focus:ring-purple-500 focus:border-purple-500 bg-gray-700 text-gray-100 transition-colors duration-200"
                                     placeholder="••••••••"
+                                    autoComplete={isLoginMode ? "current-password" : "new-password"} // Added autocomplete
                                 />
                             </div>
                             <button
@@ -405,6 +451,7 @@ const App = () => {
                                         className="block w-full py-2 px-4 border border-gray-600 rounded-lg shadow-sm focus:ring-purple-500 focus:border-purple-500 bg-gray-700 text-gray-100 appearance-none pr-8 cursor-pointer transition-colors duration-200"
                                     >
                                         <option value="" disabled>Choose a component...</option>
+                                        {/* Reference arduinoComponents from outside the component */}
                                         {arduinoComponents.map((component, index) => (
                                             <option key={index} value={component}>
                                                 {component}
