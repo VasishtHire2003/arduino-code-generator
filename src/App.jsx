@@ -47,12 +47,13 @@ const App = () => {
         ? JSON.parse(__firebase_config)
         : {
             // Default/fallback config if running outside Canvas for local testing
-            apiKey: "YOUR_FIREBASE_API_KEY", // Replace with your actual Firebase API Key if testing locally outside Canvas
-            authDomain: "your-project-id.firebaseapp.com",
-            projectId: "your-project-id",
-            storageBucket: "your-project-id.appspot.com",
-            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            appId: "YOUR_FIREBASE_APP_ID"
+            apiKey: "AIzaSyAkkPHH7jsYFxenWdx-Xfv5ahp_6dQuyak",
+            authDomain: "arduino-code-forge.firebaseapp.com",
+            projectId: "arduino-code-forge",
+            storageBucket: "arduino-code-forge.firebasestorage.app",
+            messagingSenderId: "108240431983",
+            appId: "1:108240431983:web:281bfa8a3e02e122b0969a",
+            measurementId: "G-HR0HV6LM8X"
         };
 
     const firebaseApp = initializeApp(firebaseConfig);
