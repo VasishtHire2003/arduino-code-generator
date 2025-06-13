@@ -1,0 +1,7 @@
+[build]
+  command = "npm run build" # Your existing build command for the React app
+  publish = "dist"          # Your existing publish directory for the React app
+
+[functions]
+  directory = "netlify/functions" # This tells Netlify where your functions code lives
+  node_bundler = "esbuild"      # Recommended for faster builds and smaller bundles
