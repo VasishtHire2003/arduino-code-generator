@@ -1,8 +1,8 @@
-// netlify/functions/generate-arduino-code.js
+// netlify/functions/generate-arduino-code.cjs
 
 // Import necessary libraries for Google Generative AI
 // This SDK is designed for server-side use and can safely access environment variables
-import { GoogleGenerativeAI } from '@google/generative-ai';
+const { GoogleGenerativeAI } = require('@google/generative-ai'); // Changed to require for CommonJS
 
 // This is the main handler for your Netlify Function.
 // It will be triggered by HTTP requests to /.netlify/functions/generate-arduino-code
@@ -22,11 +22,11 @@ exports.handler = async (event) => {
 
     // Check if the API key is available. If not, return an internal server error.
     if (!apiKey) {
-        console.error('GEMINI_API_KEY environment variable is not set.');
+        console.error('SERVER ERROR: GEMINI_API_KEY environment variable is not set.');
         return {
             statusCode: 500,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ error: 'Server configuration error: API key missing.' }),
+            body: JSON.stringify({ error: 'Server configuration error: API key missing on the server.' }),
         };
     }
 
@@ -40,6 +40,7 @@ exports.handler = async (event) => {
 
         // Basic validation for incoming data.
         if (!selectedComponent || !description) {
+            console.error('FUNCTION ERROR: Missing selectedComponent or description in request body.');
             return {
                 statusCode: 400, // Bad Request
                 headers: { 'Content-Type': 'application/json' },
@@ -54,9 +55,21 @@ exports.handler = async (event) => {
         const geminiModel = genAI.getGenerativeModel({ model: model });
 
         // Generate content using the Gemini API.
-        const result = await geminiModel.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text(); // Extract the generated text content
+        // Added more robust error handling around this critical API call
+        let text;
+        try {
+            const result = await geminiModel.generateContent(prompt);
+            const response = await result.response;
+            text = response.text(); // Extract the generated text content
+        } catch (apiError) {
+            console.error('GEMINI API ERROR: Failed to generate content from Gemini API:', apiError.message || apiError);
+            // Re-throw or return an error specific to the API call failure
+            return {
+                statusCode: 500,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: `AI generation failed: ${apiError.message || 'Unknown API error'}. Please try again with a different prompt.` }),
+            };
+        }
 
         // Return the generated code as a successful response.
         return {
@@ -65,15 +78,14 @@ exports.handler = async (event) => {
             body: JSON.stringify({ generatedCode: text }), // Send back the generated code
         };
 
-    } catch (error) {
-        // Log the error for server-side debugging.
-        console.error('Error in Netlify function:', error);
-
+    } catch (parseError) {
+        // This catch block handles errors related to parsing the event body or other initial function logic
+        console.error('FUNCTION ERROR: Unhandled error in function execution:', parseError.message || parseError);
         // Return an error response to the frontend.
         return {
             statusCode: 500, // Internal Server Error
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ error: 'Failed to generate code via proxy. Please try again.' }),
+            body: JSON.stringify({ error: 'An unexpected server error occurred. Please try again.' }),
         };
     }
 };
